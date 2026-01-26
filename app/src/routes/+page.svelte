@@ -12,6 +12,12 @@
   let showBackups = false;
   let importInput: HTMLInputElement;
   let expandedNodes: Set<string> = new Set(['Home']);
+  
+  // Sanitize mode variables
+  let isSanitizing = false;
+  let sanitizeConflicts: Array<{ pageName: string; sources: string[] }> = [];
+  let currentConflictIndex = 0;
+  let conflictResolutions: Record<string, string> = {};
 
   type TreeNode = {
     name: string;
@@ -107,49 +113,51 @@
   }
 
   function savePage() {
-    // Auto-link existing page names
-    const autoLinkedContent = autoLinkPages(content);
-    
     pages.update((p) => {
       p[currentTitle] = {
         title: currentTitle,
-        content: autoLinkedContent
+        content
       };
       return p;
     });
-    
-    // Update the content display to reflect auto-linked changes
-    content = autoLinkedContent;
   }
 
-  function autoLinkPages(text: string): string {
-    const existingPages = Object.keys($pages);
+  function getSourceLinkedPages(): Set<string> {
+    const sourceLinks = new Set<string>();
     
-    // Sort by length (longest first) to avoid partial matches
-    existingPages.sort((a, b) => b.length - a.length);
-    
-    let result = text;
-    
-    existingPages.forEach((pageName) => {
-      // Skip if the page name is empty
-      if (!pageName) return;
-      
-      // Create a regex to find the page name not already in links
-      // Match the page name but not if it's already wrapped in [[...]]
-      const escapedPageName = pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const regex = new RegExp(`(?<!\\[\\[)\\b${escapedPageName}\\b(?!\\]\\])`, 'g');
-      
-      result = result.replace(regex, `[[${pageName}]]`);
+    Object.values($pages).forEach((page) => {
+      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      let match;
+      while ((match = linkRegex.exec(page.content)) !== null) {
+        sourceLinks.add(match[1].trim());
+      }
     });
     
-    return result;
+    return sourceLinks;
   }
 
   function renderContent(text: string) {
-    return parseWikiLinks(text, (title) => {
+    const sourceLinkedPages = getSourceLinkedPages();
+    
+    // First, handle source links (explicit [[...]] format)
+    let result = parseWikiLinks(text, (title) => {
       const trimmedTitle = title.trim();
-      return `<a href="#" data-link="${trimmedTitle}">${trimmedTitle}</a>`;
+      return `<a href="#" data-link="${trimmedTitle}" class="source-link">${trimmedTitle}</a>`;
     });
+    
+    // Then, handle proxy links (page names without brackets that have source links)
+    sourceLinkedPages.forEach((pageName) => {
+      if (!pageName) return;
+      
+      // Find words that match page names but aren't already in links
+      const escapedPageName = pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      // Match the page name but only if it's not inside an <a> tag or [[...]]
+      const regex = new RegExp(`(?<!\\[\\[)(?<![>\\w])\\b${escapedPageName}\\b(?!\\]\\])(?![^<]*</)`, 'g');
+      
+      result = result.replace(regex, `<a href="#" data-link="${pageName}" class="proxy-link">${pageName}</a>`);
+    });
+    
+    return result;
   }
 
   function handleClick(e: MouseEvent) {
@@ -213,6 +221,98 @@
   });
 
   $: renderedContent = renderContent(content);
+
+  function findConflicts(): Array<{ pageName: string; sources: string[] }> {
+    const sourceMap: Record<string, string[]> = {};
+    const allPages = get(pages);
+    
+    // Find all source links and track which pages have them
+    Object.entries(allPages).forEach(([pageName, page]) => {
+      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      let match;
+      
+      while ((match = linkRegex.exec(page.content)) !== null) {
+        const linkedPageName = match[1].trim();
+        if (!sourceMap[linkedPageName]) {
+          sourceMap[linkedPageName] = [];
+        }
+        sourceMap[linkedPageName].push(pageName);
+      }
+    });
+    
+    // Return only pages with multiple sources
+    return Object.entries(sourceMap)
+      .filter(([_, sources]) => sources.length > 1)
+      .map(([pageName, sources]) => ({ pageName, sources: Array.from(new Set(sources)) }));
+  }
+
+  function startSanitize() {
+    const conflicts = findConflicts();
+    if (conflicts.length === 0) {
+      alert('No conflicts found. Your wiki is clean!');
+      return;
+    }
+    
+    sanitizeConflicts = conflicts;
+    currentConflictIndex = 0;
+    conflictResolutions = {};
+    isSanitizing = true;
+  }
+
+  function goToSource(pageName: string) {
+    loadPage(pageName);
+  }
+
+  function resolveConflict(chosenSource: string) {
+    const conflict = sanitizeConflicts[currentConflictIndex];
+    conflictResolutions[conflict.pageName] = chosenSource;
+    
+    // Move to next conflict or finish
+    if (currentConflictIndex < sanitizeConflicts.length - 1) {
+      currentConflictIndex++;
+    } else {
+      applySanitization();
+    }
+  }
+
+  function applySanitization() {
+    const allPages = get(pages);
+    
+    // For each conflict, remove [[ ]] from non-chosen sources
+    Object.entries(conflictResolutions).forEach(([pageName, chosenSource]) => {
+      const conflict = sanitizeConflicts.find(c => c.pageName === pageName);
+      if (!conflict) return;
+      
+      // Update each source page
+      conflict.sources.forEach((sourcePage) => {
+        if (sourcePage !== chosenSource) {
+          // Remove [[ ]] from this source page
+          allPages[sourcePage].content = allPages[sourcePage].content.replace(
+            new RegExp(`\\[\\[${pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\]`, 'g'),
+            pageName
+          );
+        }
+      });
+    });
+    
+    // Update all pages at once
+    pages.set(allPages);
+    
+    // Exit sanitize mode
+    isSanitizing = false;
+    sanitizeConflicts = [];
+    currentConflictIndex = 0;
+    conflictResolutions = {};
+    
+    alert('Sanitization complete!');
+  }
+
+  function cancelSanitize() {
+    isSanitizing = false;
+    sanitizeConflicts = [];
+    currentConflictIndex = 0;
+    conflictResolutions = {};
+  }
 </script>
 
 <style>
@@ -230,6 +330,26 @@
   .viewer a {
     color: blue;
     cursor: pointer;
+    text-decoration: underline;
+  }
+
+  .viewer a.source-link {
+    color: #0066cc;
+    font-weight: 500;
+    text-decoration: underline;
+    background-color: #f0f7ff;
+    padding: 1px 3px;
+    border-radius: 2px;
+  }
+
+  .viewer a.proxy-link {
+    color: #0066cc;
+    text-decoration: dotted underline;
+    opacity: 0.8;
+  }
+
+  .viewer a.proxy-link:hover {
+    opacity: 1;
     text-decoration: underline;
   }
 
@@ -354,6 +474,87 @@
     margin-top: 10px;
   }
 
+  .modal-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+  }
+
+  .modal {
+    background: white;
+    border-radius: 8px;
+    padding: 20px;
+    max-width: 500px;
+    width: 90%;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+  }
+
+  .modal h3 {
+    margin-top: 0;
+    color: #333;
+  }
+
+  .conflict-item {
+    padding: 12px;
+    background-color: #f9f9f9;
+    border-left: 4px solid #ff9800;
+    margin-bottom: 10px;
+    border-radius: 4px;
+  }
+
+  .source-option {
+    display: flex;
+    align-items: center;
+    padding: 8px;
+    margin: 8px 0;
+    background-color: #f5f5f5;
+    border-radius: 4px;
+  }
+
+  .source-option input[type="radio"] {
+    margin-right: 10px;
+    cursor: pointer;
+  }
+
+  .source-link-button {
+    background: none;
+    border: none;
+    color: #0066cc;
+    cursor: pointer;
+    text-decoration: underline;
+    padding: 0;
+    margin: 0;
+  }
+
+  .source-link-button:hover {
+    text-decoration: none;
+  }
+
+  .modal-buttons {
+    display: flex;
+    gap: 10px;
+    margin-top: 20px;
+    justify-content: flex-end;
+  }
+
+  .modal-buttons button {
+    padding: 8px 16px;
+  }
+
+  textarea:disabled {
+    background-color: #f5f5f5;
+    color: #999;
+    cursor: not-allowed;
+  }
+
+
 </style>
 
 <div class="container">
@@ -375,6 +576,7 @@
       <button on:click={() => showBackups = !showBackups}>
         {showBackups ? 'Hide' : 'Show'} Backups ({backups.length})
       </button>
+      <button on:click={startSanitize}>Sanitize</button>
     </div>
 
     <input
@@ -402,6 +604,7 @@
       bind:value={content}
       on:input={savePage}
       placeholder="Type here. Use [[Page Name]] to link."
+      disabled={isSanitizing}
     ></textarea>
 
     <h3>Preview</h3>
@@ -415,4 +618,54 @@
     </div>
   </div>
 </div>
+
+{#if isSanitizing && sanitizeConflicts.length > 0}
+  <div class="modal-overlay">
+    <div class="modal">
+      <h3>Resolve Wiki Link Conflicts</h3>
+      
+      {#if currentConflictIndex < sanitizeConflicts.length}
+        {@const conflict = sanitizeConflicts[currentConflictIndex]}
+        
+        <div class="conflict-item">
+          <strong>Page "[[{conflict.pageName}]]" has multiple sources:</strong>
+          <p>This page name is defined as a source link in {conflict.sources.length} places. Please choose which one to keep as the primary source:</p>
+        </div>
+
+        <div>
+          {#each conflict.sources as source}
+            <div class="source-option">
+              <input
+                type="radio"
+                id="source-{source}"
+                name="conflict-source-{currentConflictIndex}"
+                value={source}
+                checked={conflictResolutions[conflict.pageName] === source}
+                on:change={() => conflictResolutions[conflict.pageName] = source}
+              />
+              <label for="source-{source}" style="margin: 0; flex: 1; cursor: pointer;">
+                <button
+                  class="source-link-button"
+                  on:click={() => goToSource(source)}
+                >
+                  {source}
+                </button>
+              </label>
+            </div>
+          {/each}
+        </div>
+
+        <div class="modal-buttons">
+          <button on:click={cancelSanitize}>Cancel</button>
+          <button 
+            on:click={() => resolveConflict(conflictResolutions[conflict.pageName])}
+            disabled={!conflictResolutions[conflict.pageName]}
+          >
+            {currentConflictIndex < sanitizeConflicts.length - 1 ? 'Next' : 'Finish'}
+          </button>
+        </div>
+      {/if}
+    </div>
+  </div>
+{/if}
 
