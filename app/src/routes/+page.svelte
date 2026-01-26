@@ -107,13 +107,42 @@
   }
 
   function savePage() {
+    // Auto-link existing page names
+    const autoLinkedContent = autoLinkPages(content);
+    
     pages.update((p) => {
       p[currentTitle] = {
         title: currentTitle,
-        content
+        content: autoLinkedContent
       };
       return p;
     });
+    
+    // Update the content display to reflect auto-linked changes
+    content = autoLinkedContent;
+  }
+
+  function autoLinkPages(text: string): string {
+    const existingPages = Object.keys($pages);
+    
+    // Sort by length (longest first) to avoid partial matches
+    existingPages.sort((a, b) => b.length - a.length);
+    
+    let result = text;
+    
+    existingPages.forEach((pageName) => {
+      // Skip if the page name is empty
+      if (!pageName) return;
+      
+      // Create a regex to find the page name not already in links
+      // Match the page name but not if it's already wrapped in [[...]]
+      const escapedPageName = pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const regex = new RegExp(`(?<!\\[\\[)\\b${escapedPageName}\\b(?!\\]\\])`, 'g');
+      
+      result = result.replace(regex, `[[${pageName}]]`);
+    });
+    
+    return result;
   }
 
   function renderContent(text: string) {
