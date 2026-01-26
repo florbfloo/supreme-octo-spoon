@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Kill any existing npm run dev processes to avoid multiple instances
-pkill -f "npm run dev" || true
+pkill -f "run dev" || true
 sleep 1
 
 # Top-level runner for Codespaces: installs deps in app/ and starts the dev server.
