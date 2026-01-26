@@ -579,7 +579,6 @@
     <h2>{currentTitle}</h2>
 
     <div class="controls">
-      <button on:click={savePage}>Save Page</button>
       <button on:click={handleExport}>Export</button>
       <button on:click={() => importInput.click()}>Import</button>
       <button on:click={() => showBackups = !showBackups}>
