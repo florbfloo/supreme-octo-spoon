@@ -4,12 +4,61 @@
   import { getBackups, restoreBackup, exportData, importData } from '$lib/stores/pages';
   import { get } from 'svelte/store';
   import { onMount } from 'svelte';
+  import TreeNode from '$lib/TreeNode.svelte';
 
   let currentTitle = 'Home';
   let content = '';
   let backups = getBackups();
   let showBackups = false;
   let importInput: HTMLInputElement;
+  let expandedNodes: Set<string> = new Set(['']);
+
+  type TreeNode = {
+    name: string;
+    path: string;
+    isPage: boolean;
+    children: Map<string, TreeNode>;
+  };
+
+  function buildPageTree(): TreeNode {
+    const root: TreeNode = {
+      name: 'Root',
+      path: '',
+      isPage: false,
+      children: new Map()
+    };
+
+    Object.keys($pages).forEach((pageTitle) => {
+      const parts = pageTitle.split('/');
+      let current = root;
+
+      parts.forEach((part, index) => {
+        const path = parts.slice(0, index + 1).join('/');
+        if (!current.children.has(part)) {
+          current.children.set(part, {
+            name: part,
+            path,
+            isPage: index === parts.length - 1,
+            children: new Map()
+          });
+        }
+        current = current.children.get(part)!;
+      });
+    });
+
+    return root;
+  }
+
+  function toggleNode(path: string) {
+    if (expandedNodes.has(path)) {
+      expandedNodes.delete(path);
+    } else {
+      expandedNodes.add(path);
+    }
+    expandedNodes = expandedNodes;
+  }
+
+  $: pageTree = buildPageTree();
 
   function loadPage(title: string) {
     currentTitle = title;
@@ -63,7 +112,6 @@
         if (importData(content)) {
           alert('Data imported successfully!');
           backups = getBackups();
-          // Reload the current page to update the textbox
           loadPage(currentTitle);
         } else {
           alert('Failed to import data. Invalid JSON file.');
@@ -77,7 +125,6 @@
     if (confirm('Restore to this backup? Current changes will be lost.')) {
       restoreBackup(timestamp);
       backups = getBackups();
-      // Reload current page
       if ($pages[currentTitle]) {
         loadPage(currentTitle);
       } else {
@@ -166,19 +213,37 @@
   input[type="file"] {
     display: none;
   }
+
+  .sidebar {
+    overflow-y: auto;
+    border-right: 1px solid #ddd;
+    padding: 10px;
+  }
+
+  .main-content {
+    padding: 10px;
+    overflow-y: auto;
+  }
+
+  h3 {
+    margin-top: 10px;
+  }
+
 </style>
 
 <div class="container">
-  <div>
+  <div class="sidebar">
     <h3>Pages</h3>
-    {#each Object.keys($pages) as title}
-      <div>
-        <a href="#" on:click={(e) => { e.preventDefault(); loadPage(title); }}>{title}</a>
-      </div>
-    {/each}
+    <div class="tree-node">
+      {#each Array.from(pageTree.children.values()) as node (node.path)}
+        <div class="tree-item">
+          <TreeNode {node} {expandedNodes} {toggleNode} {loadPage} {currentTitle} />
+        </div>
+      {/each}
+    </div>
   </div>
 
-  <div>
+  <div class="main-content">
     <h2>{currentTitle}</h2>
 
     <div class="controls">
@@ -214,14 +279,17 @@
       bind:value={content}
       on:input={savePage}
       placeholder="Type here. Use [[Page Name]] to link."
-    />
+    ></textarea>
 
     <h3>Preview</h3>
     <div
-  class="viewer"
-  on:click={handleClick}
->
-  {@html renderedContent}
-</div>
+      class="viewer"
+      on:click={handleClick}
+      role="region"
+      aria-label="Content preview"
+    >
+      {@html renderedContent}
+    </div>
   </div>
 </div>
+
