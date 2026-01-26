@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Top-level runner for Codespaces: installs deps in app/ and starts the dev server.
+cd "$(dirname "$0")"
+
+echo "Checking Node.js and npm..."
+if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+  echo "Error: Node.js and npm are required. Install them in your Codespace and retry."
+  exit 1
+fi
+
+echo "Installing dependencies in app/... (this may take a minute)"
+if [ -f app/package-lock.json ]; then
+  npm ci --prefix app
+else
+  npm install --prefix app
+fi
+
+echo "Starting dev server (Vite) in app/"
+exec npm --prefix app run dev -- --host
