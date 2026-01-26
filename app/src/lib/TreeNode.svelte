@@ -46,15 +46,18 @@
       </div>
     {/if}
   {:else}
-    <span
-      class="tree-label {node.isPage ? 'tree-page' : 'tree-page'}"
-      on:click={() => loadPage(node.path)}
-      role="button"
-      tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && loadPage(node.path)}
-    >
-      {node.name}
-    </span>
+    <div class="tree-leaf">
+      <span class="tree-toggle-placeholder"></span>
+      <span
+        class="tree-label tree-folder"
+        on:click={() => loadPage(node.path)}
+        role="button"
+        tabindex="0"
+        on:keydown={(e) => e.key === 'Enter' && loadPage(node.path)}
+      >
+        {node.name}
+      </span>
+    </div>
   {/if}
 </div>
 
@@ -105,5 +108,16 @@
 
   .tree-item {
     padding: 4px 0;
+  }
+
+  .tree-leaf {
+    display: flex;
+    align-items: center;
+  }
+
+  .tree-toggle-placeholder {
+    display: inline-block;
+    width: 20px;
+    margin-right: 4px;
   }
 </style>
