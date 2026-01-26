@@ -62,6 +62,21 @@
       });
     }
 
+    // Also include any pages that exist but aren't linked from Home (orphans)
+    Object.keys($pages).forEach((pageName) => {
+      if (pageName === 'Home') return;
+      if (!root.children.has(pageName)) {
+        const orphanNode: TreeNode = {
+          name: pageName,
+          path: pageName,
+          isPage: !!$pages[pageName],
+          children: new Map()
+        };
+        root.children.set(pageName, orphanNode);
+        addChildrenToNode(orphanNode, pageName, new Set(['Home', pageName]));
+      }
+    });
+
     return root;
   }
 
