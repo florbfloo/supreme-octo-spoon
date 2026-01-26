@@ -28,52 +28,22 @@
 
   function buildPageTree(): TreeNode {
     const root: TreeNode = {
-      name: 'Home',
-      path: 'Home',
-      isPage: false,  // Changed to false so it shows as expandable folder
+      name: '',
+      path: '',
+      isPage: false,
       children: new Map()
     };
 
-    // Extract links from the Home page
-    const homePage = $pages['Home'];
-    if (homePage) {
-      const linkRegex = /\[\[([^\]]+)\]\]/g;
-      let match;
-      const links = new Set<string>();
-      
-      while ((match = linkRegex.exec(homePage.content)) !== null) {
-        links.add(match[1].trim());
-      }
-
-      // For each link, add it as a child and recursively add its children
-      links.forEach((linkTitle) => {
-        if (!root.children.has(linkTitle)) {
-          const childNode: TreeNode = {
-            name: linkTitle,
-            path: linkTitle,
-            isPage: !!$pages[linkTitle],
-            children: new Map()
-          };
-          root.children.set(linkTitle, childNode);
-          
-          // Recursively add children from linked pages
-          addChildrenToNode(childNode, linkTitle, new Set(['Home', linkTitle]));
-        }
-      });
-    }
-
-    // Also include any pages that exist but aren't linked from Home (orphans)
     Object.keys($pages).forEach((pageName) => {
-      if (pageName === 'Home') return;
       if (!root.children.has(pageName)) {
-        const orphanNode: TreeNode = {
+        const node: TreeNode = {
           name: pageName,
           path: pageName,
           isPage: !!$pages[pageName],
           children: new Map()
         };
-        root.children.set(pageName, orphanNode);
-        addChildrenToNode(orphanNode, pageName, new Set(['Home', pageName]));
+        root.children.set(pageName, node);
+        addChildrenToNode(node, pageName, new Set([pageName]));
       }
     });
 
@@ -576,9 +546,11 @@
   <div class="sidebar">
     <h3>Pages</h3>
     <div class="tree-node">
-      <div class="tree-item">
-        <TreeNode {pageTree} {expandedNodes} {toggleNode} {loadPage} {currentTitle} node={pageTree} />
-      </div>
+      {#each Array.from(pageTree.children.values()).sort((a, b) => a.name.localeCompare(b.name)) as child (child.path)}
+        <div class="tree-item">
+          <TreeNode node={child} {expandedNodes} {toggleNode} {loadPage} {currentTitle} />
+        </div>
+      {/each}
     </div>
   </div>
 

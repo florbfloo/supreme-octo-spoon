@@ -5,7 +5,7 @@ Installing dependencies in app/... (this may take a minute)
 > svelte-kit sync || echo ''
 
 
-added 172 packages, and audited 173 packages in 10s
+added 172 packages, and audited 173 packages in 7s
 
 51 packages are looking for funding
   run `npm fund` for details
@@ -21,14 +21,15 @@ Starting dev server (Vite) in app/
 > app@0.0.1 dev
 > vite dev --host
 
-5:46:07 AM [vite] (client) Forced re-optimization of dependencies
+5:46:59 AM [vite] (client) Forced re-optimization of dependencies
 Port 5173 is in use, trying another one...
 Port 5174 is in use, trying another one...
 Port 5175 is in use, trying another one...
 Port 5176 is in use, trying another one...
+Port 5177 is in use, trying another one...
 
-  VITE v7.3.1  ready in 2598 ms
+  VITE v7.3.1  ready in 1575 ms
 
-  ➜  Local:   http://localhost:5177/
-  ➜  Network: http://10.0.0.212:5177/
+  ➜  Local:   http://localhost:5178/
+  ➜  Network: http://10.0.0.212:5178/
   ➜  press h + enter to show help
