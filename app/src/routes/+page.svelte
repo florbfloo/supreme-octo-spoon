@@ -13,6 +13,8 @@
   let showBackups = false;
   let importInput: HTMLInputElement;
   const expandedNodesStore = writable(new Set<string>());
+  let sidebarWidth = 220;
+  let isResizing = false;
   let expandedNodes: Set<string>;
   
   // Subscribe to the store
@@ -107,7 +109,38 @@
   let pageTree: TreeNode;
   $: pageTree = $pageTreeStore;
 
-  $: expandedNodesStore.set(new Set(['Home', ...Array.from(pageTree.children.values()).filter(c => c.children.size > 0).map(c => c.path)]));
+  $: expandedNodesStore.update(set => {
+    const existing = new Set<string>();
+    const collect = (node: TreeNode) => {
+      existing.add(node.path);
+      for (const child of node.children.values()) {
+        collect(child);
+      }
+    };
+    collect(pageTree);
+    return new Set([...set].filter(p => existing.has(p)));
+  });
+
+  function startResize(e: MouseEvent) {
+    isResizing = true;
+    document.addEventListener('mousemove', resize);
+    document.addEventListener('mouseup', stopResize);
+  }
+
+  function resize(e: MouseEvent) {
+    if (isResizing) {
+      const newWidth = e.clientX;
+      if (newWidth > 100 && newWidth < window.innerWidth - 200) {
+        sidebarWidth = newWidth;
+      }
+    }
+  }
+
+  function stopResize() {
+    isResizing = false;
+    document.removeEventListener('mousemove', resize);
+    document.removeEventListener('mouseup', stopResize);
+  }
 
   function loadPage(title: string) {
     currentTitle = title;
@@ -231,8 +264,10 @@
         try {
           expandedNodesStore.set(new Set(JSON.parse(saved)));
         } catch (e) {
-          // ignore
+          expandedNodesStore.set(new Set(['Home']));
         }
+      } else {
+        expandedNodesStore.set(new Set(['Home']));
       }
     }
   });
@@ -337,7 +372,7 @@
 <style>
   .container {
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: var(--sidebar-width) 5px 1fr;
     height: 100vh;
   }
 
@@ -424,8 +459,19 @@
 
   .sidebar {
     overflow-y: auto;
+    overflow-x: auto;
     border-right: 1px solid #ddd;
     padding: 10px;
+  }
+
+  .resizer {
+    width: 5px;
+    cursor: col-resize;
+    background: #ddd;
+  }
+
+  .resizer:hover {
+    background: #bbb;
   }
 
   .tree-node {
@@ -576,7 +622,7 @@
 
 </style>
 
-<div class="container">
+<div class="container" style="--sidebar-width: {sidebarWidth}px">
   <div class="sidebar">
     <h3>Pages</h3>
     <div class="tree-node">
@@ -585,7 +631,7 @@
       </div>
     </div>
   </div>
-
+  <div class="resizer" on:mousedown={startResize}></div>
   <div class="main-content">
     <h2>{currentTitle}</h2>
 

@@ -23,10 +23,10 @@
     </button>
     <span 
       class="tree-label tree-folder"
-      on:click={() => loadPage(node.name)}
+      on:click={() => { if (document.activeElement?.tagName !== 'TEXTAREA') loadPage(node.name); }}
       role="button"
       tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && loadPage(node.name)}
+      on:keydown={(e) => e.key === 'Enter' && document.activeElement?.tagName !== 'TEXTAREA' && loadPage(node.name)}
     >
       {node.name}
     </span>
@@ -50,10 +50,10 @@
       <span class="tree-toggle-placeholder"></span>
       <span
         class="tree-label tree-folder"
-        on:click={() => loadPage(node.name)}
+        on:click={() => { if (document.activeElement?.tagName !== 'TEXTAREA') loadPage(node.name); }}
         role="button"
         tabindex="0"
-        on:keydown={(e) => e.key === 'Enter' && loadPage(node.name)}
+        on:keydown={(e) => e.key === 'Enter' && document.activeElement?.tagName !== 'TEXTAREA' && loadPage(node.name)}
       >
         {node.name}
       </span>
@@ -108,6 +108,8 @@
 
   .tree-item {
     padding: 4px 0;
+    display: flex;
+    align-items: center;
   }
 
   .tree-leaf {
