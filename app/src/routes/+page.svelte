@@ -11,7 +11,7 @@
   let backups = getBackups();
   let showBackups = false;
   let importInput: HTMLInputElement;
-  let expandedNodes: Set<string> = new Set(['']);
+  let expandedNodes: Set<string> = new Set(['Home']);
 
   type TreeNode = {
     name: string;
@@ -22,31 +22,71 @@
 
   function buildPageTree(): TreeNode {
     const root: TreeNode = {
-      name: 'Root',
-      path: '',
-      isPage: false,
+      name: 'Home',
+      path: 'Home',
+      isPage: false,  // Changed to false so it shows as expandable folder
       children: new Map()
     };
 
-    Object.keys($pages).forEach((pageTitle) => {
-      const parts = pageTitle.split('/');
-      let current = root;
+    // Extract links from the Home page
+    const homePage = $pages['Home'];
+    if (homePage) {
+      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      let match;
+      const links = new Set<string>();
+      
+      while ((match = linkRegex.exec(homePage.content)) !== null) {
+        links.add(match[1].trim());
+      }
 
-      parts.forEach((part, index) => {
-        const path = parts.slice(0, index + 1).join('/');
-        if (!current.children.has(part)) {
-          current.children.set(part, {
-            name: part,
-            path,
-            isPage: index === parts.length - 1,
+      // For each link, add it as a child and recursively add its children
+      links.forEach((linkTitle) => {
+        if (!root.children.has(linkTitle)) {
+          const childNode: TreeNode = {
+            name: linkTitle,
+            path: linkTitle,
+            isPage: !!$pages[linkTitle],
             children: new Map()
-          });
+          };
+          root.children.set(linkTitle, childNode);
+          
+          // Recursively add children from linked pages
+          addChildrenToNode(childNode, linkTitle, new Set(['Home', linkTitle]));
         }
-        current = current.children.get(part)!;
       });
-    });
+    }
 
     return root;
+  }
+
+  function addChildrenToNode(node: TreeNode, pageName: string, visited: Set<string>) {
+    const page = $pages[pageName];
+    if (!page) return;
+
+    const linkRegex = /\[\[([^\]]+)\]\]/g;
+    let match;
+
+    while ((match = linkRegex.exec(page.content)) !== null) {
+      const linkTitle = match[1].trim();
+      
+      // Avoid circular references
+      if (!visited.has(linkTitle) && linkTitle !== 'Home') {
+        visited.add(linkTitle);
+        
+        if (!node.children.has(linkTitle)) {
+          const childNode: TreeNode = {
+            name: linkTitle,
+            path: linkTitle,
+            isPage: !!$pages[linkTitle],
+            children: new Map()
+          };
+          node.children.set(linkTitle, childNode);
+          
+          // Recursively add children
+          addChildrenToNode(childNode, linkTitle, new Set(visited));
+        }
+      }
+    }
   }
 
   function toggleNode(path: string) {
@@ -220,6 +260,62 @@
     padding: 10px;
   }
 
+  .tree-node {
+    margin: 0;
+    padding-left: 0;
+    list-style: none;
+  }
+
+  .tree-item {
+    padding: 4px 0;
+    margin-left: 0;
+  }
+
+  /* Tree node styles from TreeNode component */
+  :global(.tree-toggle) {
+    background: none;
+    border: none;
+    cursor: pointer;
+    padding: 0;
+    margin-right: 4px;
+    width: 20px;
+    color: #666;
+    font-size: 12px;
+    display: inline-block;
+  }
+
+  :global(.tree-toggle:hover) {
+    color: #000;
+  }
+
+  :global(.tree-label) {
+    cursor: pointer;
+    color: #0066cc;
+    text-decoration: none;
+    padding: 2px 4px;
+    border-radius: 2px;
+    display: inline-block;
+  }
+
+  :global(.tree-label:hover) {
+    background-color: #f0f0f0;
+    text-decoration: underline;
+  }
+
+  :global(.tree-folder) {
+    font-weight: 500;
+    color: #333;
+    cursor: default;
+  }
+
+  :global(.tree-page) {
+    color: #0066cc;
+  }
+
+  :global(.tree-children) {
+    margin-left: 16px;
+  }
+
   .main-content {
     padding: 10px;
     overflow-y: auto;
@@ -235,11 +331,9 @@
   <div class="sidebar">
     <h3>Pages</h3>
     <div class="tree-node">
-      {#each Array.from(pageTree.children.values()) as node (node.path)}
-        <div class="tree-item">
-          <TreeNode {node} {expandedNodes} {toggleNode} {loadPage} {currentTitle} />
-        </div>
-      {/each}
+      <div class="tree-item">
+        <TreeNode {pageTree} {expandedNodes} {toggleNode} {loadPage} {currentTitle} node={pageTree} />
+      </div>
     </div>
   </div>
 

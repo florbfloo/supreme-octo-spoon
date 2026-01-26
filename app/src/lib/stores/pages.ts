@@ -62,7 +62,9 @@ export function importData(jsonString: string) {
 const stored = browser ? localStorage.getItem('wiki-pages') : null;
 
 const initialPages: Record<string, WikiPage> =
-  stored ? JSON.parse(stored) : {};
+  stored ? JSON.parse(stored) : {
+    'Home': { title: 'Home', content: 'Welcome! Try adding links like [[Documentation]] or [[Projects]]' },
+  };
 
 export const pages = writable<Record<string, WikiPage>>(initialPages);
 

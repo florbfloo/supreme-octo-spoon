@@ -21,7 +21,15 @@
     <button class="tree-toggle" on:click={() => toggleNode(node.path)}>
       {isExpanded ? '▼' : '▶'}
     </button>
-    <span class="tree-label tree-folder">{node.name}</span>
+    <span 
+      class="tree-label tree-folder"
+      on:click={() => loadPage(node.path)}
+      role="button"
+      tabindex="0"
+      on:keydown={(e) => e.key === 'Enter' && loadPage(node.path)}
+    >
+      {node.name}
+    </span>
     {#if isExpanded}
       <div class="tree-children">
         {#each Array.from(node.children.values()) as child (child.path)}
@@ -37,9 +45,9 @@
         {/each}
       </div>
     {/if}
-  {:else if node.isPage}
+  {:else}
     <span
-      class="tree-label tree-page"
+      class="tree-label {node.isPage ? 'tree-page' : 'tree-page'}"
       on:click={() => loadPage(node.path)}
       role="button"
       tabindex="0"
@@ -47,8 +55,6 @@
     >
       {node.name}
     </span>
-  {:else}
-    <span class="tree-label tree-folder">{node.name}</span>
   {/if}
 </div>
 
