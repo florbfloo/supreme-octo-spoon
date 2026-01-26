@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Kill any existing vite dev processes to avoid multiple instances
-pkill -f "vite dev" || true
+# Kill any existing vite processes to avoid multiple instances
+pkill -f "vite" || true
 
 # Top-level runner for Codespaces: installs deps in app/ and starts the dev server.
 cd "$(dirname "$(readlink -f "$0")")"
