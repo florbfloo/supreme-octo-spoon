@@ -2,8 +2,9 @@
   import { pages } from '$lib/stores/pages';
   import { parseWikiLinks } from '$lib/wiki';
   import { getBackups, restoreBackup, exportData, importData } from '$lib/stores/pages';
-  import { get } from 'svelte/store';
+  import { get, derived, writable } from 'svelte/store';
   import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
   import TreeNode from '$lib/TreeNode.svelte';
 
   let currentTitle = 'Home';
@@ -11,7 +12,11 @@
   let backups = getBackups();
   let showBackups = false;
   let importInput: HTMLInputElement;
-  let expandedNodes: Set<string> = new Set();
+  const expandedNodesStore = writable(new Set<string>());
+  let expandedNodes: Set<string>;
+  
+  // Subscribe to the store
+  $: expandedNodes = $expandedNodesStore;
   
   // Sanitize mode variables
   let isSanitizing = false;
@@ -44,7 +49,7 @@
         if (!root.children.has(linkTitle)) {
           const node: TreeNode = {
             name: linkTitle,
-            path: linkTitle,
+            path: 'Home/' + linkTitle,
             isPage: !!$pages[linkTitle],
             children: new Map()
           };
@@ -53,20 +58,6 @@
         }
       }
     }
-
-    // Add all other pages as children if not already added
-    Object.keys($pages).forEach((pageName) => {
-      if (pageName !== 'Home' && !root.children.has(pageName)) {
-        const node: TreeNode = {
-          name: pageName,
-          path: pageName,
-          isPage: !!$pages[pageName],
-          children: new Map()
-        };
-        root.children.set(pageName, node);
-        addChildrenToNode(node, pageName, new Set(['Home', pageName]));
-      }
-    });
 
     return root;
   }
@@ -88,7 +79,7 @@
         if (!node.children.has(linkTitle)) {
           const childNode: TreeNode = {
             name: linkTitle,
-            path: linkTitle,
+            path: node.path + '/' + linkTitle,
             isPage: !!$pages[linkTitle],
             children: new Map()
           };
@@ -102,17 +93,21 @@
   }
 
   function toggleNode(path: string) {
-    if (expandedNodes.has(path)) {
-      expandedNodes.delete(path);
-    } else {
-      expandedNodes.add(path);
-    }
-    expandedNodes = expandedNodes;
+    expandedNodesStore.update(set => {
+      if (set.has(path)) {
+        set.delete(path);
+      } else {
+        set.add(path);
+      }
+      return set;
+    });
   }
 
-  $: pageTree = buildPageTree();
+  const pageTreeStore = derived(pages, $pages => buildPageTree());
+  let pageTree: TreeNode;
+  $: pageTree = $pageTreeStore;
 
-  $: expandedNodes = new Set(['Home', ...Array.from(pageTree.children.values()).filter(c => c.children.size > 0).map(c => c.path)]);
+  $: expandedNodesStore.set(new Set(['Home', ...Array.from(pageTree.children.values()).filter(c => c.children.size > 0).map(c => c.path)]));
 
   function loadPage(title: string) {
     currentTitle = title;
@@ -122,11 +117,13 @@
 
   function savePage() {
     pages.update((p) => {
-      p[currentTitle] = {
-        title: currentTitle,
-        content
+      return {
+        ...p,
+        [currentTitle]: {
+          title: currentTitle,
+          content
+        }
       };
-      return p;
     });
   }
 
@@ -172,6 +169,8 @@
     const target = e.target as HTMLElement;
     const link = target.closest('[data-link]');
     if (link) {
+      // Prevent loading page if textarea is focused to avoid interrupting typing
+      if (document.activeElement?.tagName === 'TEXTAREA') return;
       e.preventDefault();
       loadPage(link.getAttribute('data-link')!);
     }
@@ -226,7 +225,19 @@
 
   onMount(() => {
     loadPage(currentTitle);
+    if (browser) {
+      const saved = localStorage.getItem('expandedNodes');
+      if (saved) {
+        try {
+          expandedNodesStore.set(new Set(JSON.parse(saved)));
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
   });
+
+  $: if (browser) localStorage.setItem('expandedNodes', JSON.stringify(Array.from($expandedNodesStore)));
 
   $: renderedContent = renderContent(content);
 

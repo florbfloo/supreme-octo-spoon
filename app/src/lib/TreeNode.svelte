@@ -23,10 +23,10 @@
     </button>
     <span 
       class="tree-label tree-folder"
-      on:click={() => loadPage(node.path)}
+      on:click={() => loadPage(node.name)}
       role="button"
       tabindex="0"
-      on:keydown={(e) => e.key === 'Enter' && loadPage(node.path)}
+      on:keydown={(e) => e.key === 'Enter' && loadPage(node.name)}
     >
       {node.name}
     </span>
@@ -50,10 +50,10 @@
       <span class="tree-toggle-placeholder"></span>
       <span
         class="tree-label tree-folder"
-        on:click={() => loadPage(node.path)}
+        on:click={() => loadPage(node.name)}
         role="button"
         tabindex="0"
-        on:keydown={(e) => e.key === 'Enter' && loadPage(node.path)}
+        on:keydown={(e) => e.key === 'Enter' && loadPage(node.name)}
       >
         {node.name}
       </span>
