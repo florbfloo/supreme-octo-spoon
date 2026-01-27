@@ -17,6 +17,11 @@
   let isResizing = false;
   let expandedNodes: Set<string>;
   
+  // Context menu variables
+  let showContextMenu = false;
+  let menuPosition = { x: 0, y: 0 };
+  let selectedWord = '';
+  
   // Subscribe to the store
   $: expandedNodes = $expandedNodesStore;
   
@@ -209,6 +214,50 @@
     }
   }
 
+  function handleContextMenu(e: MouseEvent) {
+    const textarea = e.target as HTMLTextAreaElement;
+    if (textarea.tagName !== 'TEXTAREA') return;
+
+    e.preventDefault();
+
+    let start = textarea.selectionStart;
+    let end = textarea.selectionEnd;
+
+    if (start === end) {
+      // Select the word under the cursor
+      const text = textarea.value;
+      let wordStart = start;
+      while (wordStart > 0 && /\w/.test(text[wordStart - 1])) wordStart--;
+      let wordEnd = start;
+      while (wordEnd < text.length && /\w/.test(text[wordEnd])) wordEnd++;
+      textarea.setSelectionRange(wordStart, wordEnd);
+      start = wordStart;
+      end = wordEnd;
+    }
+
+    const word = textarea.value.substring(start, end).trim();
+    const currentPages = get(pages);
+    if (word && !Object.keys(currentPages).some(p => p.toLowerCase() === word.toLowerCase())) {
+      selectedWord = word;
+      menuPosition = { x: e.clientX, y: e.clientY };
+      showContextMenu = true;
+    }
+  }
+
+  function makeWikiLink() {
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    if (textarea && selectedWord) {
+      textarea.setRangeText(`[[${selectedWord}]]`);
+      content = textarea.value;
+      savePage();
+    }
+    showContextMenu = false;
+  }
+
+  function hideContextMenu() {
+    showContextMenu = false;
+  }
+
   function handleExport() {
     const data = exportData();
     const blob = new Blob([data], { type: 'application/json' });
@@ -270,6 +319,16 @@
         expandedNodesStore.set(new Set(['Home']));
       }
     }
+
+    // Hide context menu on click outside
+    const handleGlobalClick = () => {
+      showContextMenu = false;
+    };
+    document.addEventListener('click', handleGlobalClick);
+
+    return () => {
+      document.removeEventListener('click', handleGlobalClick);
+    };
   });
 
   $: if (browser) localStorage.setItem('expandedNodes', JSON.stringify(Array.from($expandedNodesStore)));
@@ -619,6 +678,31 @@
     cursor: not-allowed;
   }
 
+  .context-menu {
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 4px 0;
+    min-width: 120px;
+  }
+
+  .context-menu button {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+  }
+
+  .context-menu button:hover {
+    background-color: #f0f0f0;
+  }
+
 
 </style>
 
@@ -668,6 +752,7 @@
     <textarea
       bind:value={content}
       on:input={savePage}
+      on:contextmenu={handleContextMenu}
       placeholder="Type here. Use [[Page Name]] to link."
       disabled={isSanitizing}
     ></textarea>
@@ -683,6 +768,16 @@
     </div>
   </div>
 </div>
+
+{#if showContextMenu}
+  <div 
+    class="context-menu"
+    style="position: fixed; left: {menuPosition.x}px; top: {menuPosition.y}px; z-index: 1001;"
+    on:click|stopPropagation={() => {}}
+  >
+    <button on:click={makeWikiLink}>Make wiki page</button>
+  </div>
+{/if}
 
 {#if isSanitizing && sanitizeConflicts.length > 0}
   <div class="modal-overlay">
