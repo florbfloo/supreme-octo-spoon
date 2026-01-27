@@ -59,12 +59,32 @@ export function importData(jsonString: string) {
   return false;
 }
 
+function migratePages(pages: Record<string, WikiPage>): Record<string, WikiPage> {
+  const migrated: Record<string, WikiPage> = {};
+  for (const [key, page] of Object.entries(pages)) {
+    migrated[key] = {
+      ...page,
+      content: page.content.replace(/\[\[([^\]]+)\]\]/g, '[$1]')
+    };
+  }
+  return migrated;
+}
+
 const stored = browser ? localStorage.getItem('wiki-pages') : null;
 
-const initialPages: Record<string, WikiPage> =
-  stored ? JSON.parse(stored) : {
-    'Home': { title: 'Home', content: 'Welcome! Try adding links like [[Documentation]] or [[Projects]]' },
+let initialPages: Record<string, WikiPage>;
+if (stored) {
+  const parsed = JSON.parse(stored);
+  initialPages = migratePages(parsed);
+  // Update localStorage with migrated data
+  if (browser) {
+    localStorage.setItem('wiki-pages', JSON.stringify(initialPages));
+  }
+} else {
+  initialPages = {
+    'Home': { title: 'Home', content: 'Welcome! Try adding links like [Documentation] or [Projects]' },
   };
+}
 
 export const pages = writable<Record<string, WikiPage>>(initialPages);
 

@@ -21,6 +21,7 @@
   let showContextMenu = false;
   let menuPosition = { x: 0, y: 0 };
   let selectedWord = '';
+  let menuText = '';
   
   // Subscribe to the store
   $: expandedNodes = $expandedNodesStore;
@@ -49,7 +50,7 @@
     // Add links from Home
     const homePage = $pages['Home'];
     if (homePage) {
-      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      const linkRegex = /\[([^\]]+)\]/g;
       let match;
       while ((match = linkRegex.exec(homePage.content)) !== null) {
         const linkTitle = match[1].trim();
@@ -73,7 +74,7 @@
     const page = $pages[pageName];
     if (!page) return;
 
-    const linkRegex = /\[\[([^\]]+)\]\]/g;
+    const linkRegex = /\[([^\]]+)\]/g;
     let match;
 
     while ((match = linkRegex.exec(page.content)) !== null) {
@@ -165,11 +166,11 @@
     });
   }
 
-  function getSourceLinkedPages(): Set<string> {
+  function getSourceLinkedPages(pages: Record<string, WikiPage>): Set<string> {
     const sourceLinks = new Set<string>();
     
-    Object.values($pages).forEach((page) => {
-      const linkRegex = /\[\[([^\]]+)\]\]/g;
+    Object.values(pages).forEach((page) => {
+      const linkRegex = /\[([^\]]+)\]/g;
       let match;
       while ((match = linkRegex.exec(page.content)) !== null) {
         sourceLinks.add(match[1].trim());
@@ -180,7 +181,7 @@
   }
 
   function renderContent(text: string) {
-    const sourceLinkedPages = getSourceLinkedPages();
+    const sourceLinkedPages = getSourceLinkedPages($pages);
     
     // First, handle source links (explicit [[...]] format)
     let result = parseWikiLinks(text, (title) => {
@@ -194,8 +195,8 @@
       
       // Find words that match page names but aren't already in links
       const escapedPageName = pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // Match the page name but only if it's not inside an <a> tag or [[...]]
-      const regex = new RegExp(`(?<!\\[\\[)(?<![>\\w])\\b${escapedPageName}\\b(?!\\]\\])(?![^<]*</)`, 'g');
+      // Match the page name but only if it's not inside an <a> tag or [...]
+      const regex = new RegExp(`(?<!\\[)(?<![>\\w])\\b${escapedPageName}\\b(?!\\])(?![^<]*</)`, 'gi');
       
       result = result.replace(regex, `<a href="#" data-link="${pageName}" class="proxy-link">${pageName}</a>`);
     });
@@ -237,8 +238,11 @@
 
     const word = textarea.value.substring(start, end).trim();
     const currentPages = get(pages);
-    if (word && !Object.keys(currentPages).some(p => p.toLowerCase() === word.toLowerCase())) {
+    const isExistingPage = Object.keys(currentPages).some(p => p.toLowerCase() === word.toLowerCase());
+    const isAlreadyLinked = content.toLowerCase().includes(`[${word.toLowerCase()}]`);
+    if (word && !isAlreadyLinked) {
       selectedWord = word;
+      menuText = isExistingPage ? 'Re-wikify orphan' : 'Make wiki page';
       menuPosition = { x: e.clientX, y: e.clientY };
       showContextMenu = true;
     }
@@ -247,7 +251,7 @@
   function makeWikiLink() {
     const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
     if (textarea && selectedWord) {
-      textarea.setRangeText(`[[${selectedWord}]]`);
+      textarea.setRangeText(`[${selectedWord}]`);
       content = textarea.value;
       savePage();
     }
@@ -333,6 +337,9 @@
 
   $: if (browser) localStorage.setItem('expandedNodes', JSON.stringify(Array.from($expandedNodesStore)));
 
+  $: sourceLinkedPages = getSourceLinkedPages($pages);
+  $: orphans = Object.keys($pages).filter(p => !sourceLinkedPages.has(p) && p !== 'Home');
+
   $: renderedContent = renderContent(content);
 
   function findConflicts(): Array<{ pageName: string; sources: string[] }> {
@@ -341,7 +348,7 @@
     
     // Find all source links and track which pages have them
     Object.entries(allPages).forEach(([pageName, page]) => {
-      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      const linkRegex = /\[([^\]]+)\]/g;
       let match;
       
       while ((match = linkRegex.exec(page.content)) !== null) {
@@ -399,9 +406,9 @@
       // Update each source page
       conflict.sources.forEach((sourcePage) => {
         if (sourcePage !== chosenSource) {
-          // Remove [[ ]] from this source page
+          // Remove [ ] from this source page
           allPages[sourcePage].content = allPages[sourcePage].content.replace(
-            new RegExp(`\\[\\[${pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\]`, 'g'),
+            new RegExp(`\\[${pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'g'),
             pageName
           );
         }
@@ -699,8 +706,24 @@
     color: #333;
   }
 
-  .context-menu button:hover {
+  .orphan-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .orphan-item {
+    padding: 4px 0;
+    cursor: pointer;
+    color: #666;
+    text-decoration: none;
+    border-radius: 2px;
+    padding-left: 4px;
+  }
+
+  .orphan-item:hover {
     background-color: #f0f0f0;
+    color: #333;
   }
 
 
@@ -714,6 +737,14 @@
         <TreeNode node={pageTree} {expandedNodes} {toggleNode} {loadPage} {currentTitle} />
       </div>
     </div>
+    {#if orphans.length > 0}
+      <h4>Orphan Pages</h4>
+      <ul class="orphan-list">
+        {#each orphans as orphan}
+          <li class="orphan-item" on:click={() => loadPage(orphan)}>{orphan}</li>
+        {/each}
+      </ul>
+    {/if}
   </div>
   <div class="resizer" on:mousedown={startResize}></div>
   <div class="main-content">
@@ -753,7 +784,7 @@
       bind:value={content}
       on:input={savePage}
       on:contextmenu={handleContextMenu}
-      placeholder="Type here. Use [[Page Name]] to link."
+      placeholder="Type here. Use [Page Name] to link."
       disabled={isSanitizing}
     ></textarea>
 
@@ -775,7 +806,7 @@
     style="position: fixed; left: {menuPosition.x}px; top: {menuPosition.y}px; z-index: 1001;"
     on:click|stopPropagation={() => {}}
   >
-    <button on:click={makeWikiLink}>Make wiki page</button>
+    <button on:click={makeWikiLink}>{menuText}</button>
   </div>
 {/if}
 
@@ -788,7 +819,7 @@
         {@const conflict = sanitizeConflicts[currentConflictIndex]}
         
         <div class="conflict-item">
-          <strong>Page "[[{conflict.pageName}]]" has multiple sources:</strong>
+          <strong>Page "[{conflict.pageName}]" has multiple sources:</strong>
           <p>This page name is defined as a source link in {conflict.sources.length} places. Please choose which one to keep as the primary source:</p>
         </div>
 
