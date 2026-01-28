@@ -1,4 +1,5 @@
 <script lang="ts">
+  export const ssr = false;
   import { pages } from '$lib/stores/pages';
   import { parseWikiLinks } from '$lib/wiki';
   import { getBackups, restoreBackup, exportData, importData } from '$lib/stores/pages';
@@ -12,10 +13,10 @@
   let backups = getBackups();
   let showBackups = false;
   let importInput: HTMLInputElement;
+  let container: HTMLDivElement;
   const expandedNodesStore = writable(new Set<string>());
-  let sidebarWidth = 220;
-  let isResizing = false;
-  let expandedNodes: Set<string>;
+  let pageHistory: string[] = ['Home'];
+  let historyIndex: number = 0;
   
   // Context menu variables
   let showContextMenu = false;
@@ -138,6 +139,7 @@
       const newWidth = e.clientX;
       if (newWidth > 100 && newWidth < window.innerWidth - 200) {
         sidebarWidth = newWidth;
+        if (browser) localStorage.setItem('sidebarWidth', newWidth.toString());
       }
     }
   }
@@ -148,10 +150,22 @@
     document.removeEventListener('mouseup', stopResize);
   }
 
-  function loadPage(title: string) {
-    currentTitle = title;
-    const page = get(pages)[title];
-    content = page?.content ?? '';
+  function goBack() {
+    if (historyIndex > 0) {
+      historyIndex--;
+      const title = pageHistory[historyIndex];
+      currentTitle = title;
+      content = $pages[title]?.content || '';
+    }
+  }
+
+  function goForward() {
+    if (historyIndex < pageHistory.length - 1) {
+      historyIndex++;
+      const title = pageHistory[historyIndex];
+      currentTitle = title;
+      content = $pages[title]?.content || '';
+    }
   }
 
   function savePage() {
@@ -322,6 +336,11 @@
       } else {
         expandedNodesStore.set(new Set(['Home']));
       }
+      // Load sidebar width
+      const savedWidth = localStorage.getItem('sidebarWidth');
+      if (savedWidth) sidebarWidth = parseInt(savedWidth);
+      // Set initial sidebar width
+      if (container) container.style.setProperty('--sidebar-width', sidebarWidth + 'px');
     }
 
     // Hide context menu on click outside
@@ -340,7 +359,7 @@
   $: sourceLinkedPages = getSourceLinkedPages($pages);
   $: orphans = Object.keys($pages).filter(p => !sourceLinkedPages.has(p) && p !== 'Home');
 
-  $: renderedContent = renderContent(content);
+  $: if (container) container.style.setProperty('--sidebar-width', sidebarWidth + 'px');
 
   function findConflicts(): Array<{ pageName: string; sources: string[] }> {
     const sourceMap: Record<string, string[]> = {};
@@ -437,6 +456,7 @@
 
 <style>
   .container {
+    --sidebar-width: 220px;
     display: grid;
     grid-template-columns: var(--sidebar-width) 5px 1fr;
     height: 100vh;
@@ -492,6 +512,16 @@
 
   button:hover {
     background-color: #0056b3;
+  }
+
+  button:disabled {
+    background-color: #ccc;
+    color: #666;
+    cursor: not-allowed;
+  }
+
+  button:disabled:hover {
+    background-color: #ccc;
   }
 
   .backup-list {
@@ -729,134 +759,142 @@
 
 </style>
 
-<div class="container" style="--sidebar-width: {sidebarWidth}px">
+<div class="container" bind:this={container}>
   <div class="sidebar">
     <h3>Pages</h3>
-    <div class="tree-node">
-      <div class="tree-item">
-        <TreeNode node={pageTree} {expandedNodes} {toggleNode} {loadPage} {currentTitle} />
+    {#if browser}
+      <div class="tree-node">
+        <div class="tree-item">
+          <TreeNode node={pageTree} {expandedNodes} {toggleNode} {loadPage} {currentTitle} />
+        </div>
       </div>
-    </div>
-    {#if orphans.length > 0}
-      <h4>Orphan Pages</h4>
-      <ul class="orphan-list">
-        {#each orphans as orphan}
-          <li class="orphan-item" on:click={() => loadPage(orphan)}>{orphan}</li>
-        {/each}
-      </ul>
+      {#if orphans.length > 0}
+        <h4>Orphan Pages</h4>
+        <ul class="orphan-list">
+          {#each orphans as orphan}
+            <li class="orphan-item" on:click={() => loadPage(orphan)}>{orphan}</li>
+          {/each}
+        </ul>
+      {/if}
     {/if}
   </div>
   <div class="resizer" on:mousedown={startResize}></div>
-  <div class="main-content">
-    <h2>{currentTitle}</h2>
+  {#if browser}
+    <div class="main-content">
+      <h2>{currentTitle}</h2>
 
-    <div class="controls">
-      <button on:click={handleExport}>Export</button>
-      <button on:click={() => importInput.click()}>Import</button>
-      <button on:click={() => showBackups = !showBackups}>
-        {showBackups ? 'Hide' : 'Show'} Backups ({backups.length})
-      </button>
-      <button on:click={startSanitize}>Sanitize</button>
-    </div>
-
-    <input
-      type="file"
-      accept=".json"
-      bind:this={importInput}
-      on:change={handleImport}
-    />
-
-    {#if showBackups && backups.length > 0}
-      <div class="backup-list">
-        <strong>Recent Backups:</strong>
-        {#each backups.slice().reverse() as backup (backup.timestamp)}
-          <div class="backup-item">
-            <span>{new Date(backup.timestamp).toLocaleString()}</span>
-            <button on:click={() => handleRestoreBackup(backup.timestamp)}>
-              Restore
-            </button>
-          </div>
-        {/each}
+      <div class="controls">
+        <button on:click={goBack} disabled={historyIndex <= 0}>← Back</button>
+        <button on:click={goForward} disabled={historyIndex >= pageHistory.length - 1}>Forward →</button>
+        <button on:click={handleExport}>Export</button>
+        <button on:click={() => importInput.click()}>Import</button>
+        <button on:click={() => showBackups = !showBackups}>
+          {showBackups ? 'Hide' : 'Show'} Backups ({backups.length})
+        </button>
+        <button on:click={startSanitize}>Sanitize</button>
       </div>
-    {/if}
 
-    <textarea
-      bind:value={content}
-      on:input={savePage}
-      on:contextmenu={handleContextMenu}
-      placeholder="Type here. Use [Page Name] to link."
-      disabled={isSanitizing}
-    ></textarea>
+      <input
+        type="file"
+        accept=".json"
+        bind:this={importInput}
+        on:change={handleImport}
+      />
 
-    <h3>Preview</h3>
-    <div
-      class="viewer"
-      on:click={handleClick}
-      role="region"
-      aria-label="Content preview"
-    >
-      {@html renderedContent}
-    </div>
-  </div>
-</div>
-
-{#if showContextMenu}
-  <div 
-    class="context-menu"
-    style="position: fixed; left: {menuPosition.x}px; top: {menuPosition.y}px; z-index: 1001;"
-    on:click|stopPropagation={() => {}}
-  >
-    <button on:click={makeWikiLink}>{menuText}</button>
-  </div>
-{/if}
-
-{#if isSanitizing && sanitizeConflicts.length > 0}
-  <div class="modal-overlay">
-    <div class="modal">
-      <h3>Resolve Wiki Link Conflicts</h3>
-      
-      {#if currentConflictIndex < sanitizeConflicts.length}
-        {@const conflict = sanitizeConflicts[currentConflictIndex]}
-        
-        <div class="conflict-item">
-          <strong>Page "[{conflict.pageName}]" has multiple sources:</strong>
-          <p>This page name is defined as a source link in {conflict.sources.length} places. Please choose which one to keep as the primary source:</p>
-        </div>
-
-        <div>
-          {#each conflict.sources as source}
-            <div class="source-option">
-              <input
-                type="radio"
-                id="source-{source}"
-                name="conflict-source-{currentConflictIndex}"
-                value={source}
-                checked={conflictResolutions[conflict.pageName] === source}
-                on:change={() => conflictResolutions[conflict.pageName] = source}
-              />
-              <label for="source-{source}" style="margin: 0; flex: 1; cursor: pointer;">
-                <button
-                  class="source-link-button"
-                  on:click={() => goToSource(source)}
-                >
-                  {source}
-                </button>
-              </label>
+      {#if showBackups && backups.length > 0}
+        <div class="backup-list">
+          <strong>Recent Backups:</strong>
+          {#each backups.slice().reverse() as backup (backup.timestamp)}
+            <div class="backup-item">
+              <span>{new Date(backup.timestamp).toLocaleString()}</span>
+              <button on:click={() => handleRestoreBackup(backup.timestamp)}>
+                Restore
+              </button>
             </div>
           {/each}
         </div>
-
-        <div class="modal-buttons">
-          <button on:click={cancelSanitize}>Cancel</button>
-          <button 
-            on:click={() => resolveConflict(conflictResolutions[conflict.pageName])}
-            disabled={!conflictResolutions[conflict.pageName]}
-          >
-            {currentConflictIndex < sanitizeConflicts.length - 1 ? 'Next' : 'Finish'}
-          </button>
-        </div>
       {/if}
+
+      <textarea
+        bind:value={content}
+        on:input={savePage}
+        on:contextmenu={handleContextMenu}
+        placeholder="Type here. Use [Page Name] to link."
+        disabled={isSanitizing}
+      ></textarea>
+
+      <h3>Preview</h3>
+      <div
+        class="viewer"
+        on:click={handleClick}
+        role="region"
+        aria-label="Content preview"
+      >
+        {@html renderedContent}
+      </div>
     </div>
-  </div>
+  {/if}
+</div>
+
+{#if browser}
+  {#if showContextMenu}
+    <div 
+      class="context-menu"
+      style="position: fixed; left: {menuPosition.x}px; top: {menuPosition.y}px; z-index: 1001;"
+      on:click|stopPropagation={() => {}}
+    >
+      <button on:click={makeWikiLink}>{menuText}</button>
+    </div>
+  {/if}
+
+  {#if isSanitizing && sanitizeConflicts.length > 0}
+    <div class="modal-overlay">
+      <div class="modal">
+        <h3>Resolve Wiki Link Conflicts</h3>
+        
+        {#if currentConflictIndex < sanitizeConflicts.length}
+          {@const conflict = sanitizeConflicts[currentConflictIndex]}
+          
+          <div class="conflict-item">
+            <strong>Page "[{conflict.pageName}]" has multiple sources:</strong>
+            <p>This page name is defined as a source link in {conflict.sources.length} places. Please choose which one to keep as the primary source:</p>
+          </div>
+
+          <div>
+            {#each conflict.sources as source}
+              <div class="source-option">
+                <input
+                  type="radio"
+                  id="source-{source}"
+                  name="conflict-source-{currentConflictIndex}"
+                  value={source}
+                  checked={conflictResolutions[conflict.pageName] === source}
+                  on:change={() => conflictResolutions[conflict.pageName] = source}
+                />
+                <label for="source-{source}" style="margin: 0; flex: 1; cursor: pointer;">
+                  <button
+                    class="source-link-button"
+                    on:click={() => goToSource(source)}
+                  >
+                    {source}
+                  </button>
+                </label>
+              </div>
+            {/each}
+          </div>
+
+          <div class="modal-buttons">
+            <button on:click={cancelSanitize}>Cancel</button>
+            <button 
+              on:click={() => resolveConflict(conflictResolutions[conflict.pageName])}
+              disabled={!conflictResolutions[conflict.pageName]}
+            >
+              {currentConflictIndex < sanitizeConflicts.length - 1 ? 'Next' : 'Finish'}
+            </button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 {/if}
 
