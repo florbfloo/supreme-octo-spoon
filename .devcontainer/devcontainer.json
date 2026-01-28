@@ -1,0 +1,4 @@
+{
+  "name": "supreme-octo-spoon",
+  "postCreateCommand": "sudo ln -sf \"$PWD/run\" /usr/local/bin/run && sudo chmod +x \"$PWD/run\""
+}

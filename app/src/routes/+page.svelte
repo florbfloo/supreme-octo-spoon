@@ -1,9 +1,11 @@
 <script lang="ts">
+  export const ssr = false;
   import { pages } from '$lib/stores/pages';
   import { parseWikiLinks } from '$lib/wiki';
   import { getBackups, restoreBackup, exportData, importData } from '$lib/stores/pages';
-  import { get } from 'svelte/store';
+  import { get, derived, writable } from 'svelte/store';
   import { onMount } from 'svelte';
+  import { browser } from '$app/environment';
   import TreeNode from '$lib/TreeNode.svelte';
 
   let currentTitle = 'Home';
@@ -11,7 +13,19 @@
   let backups = getBackups();
   let showBackups = false;
   let importInput: HTMLInputElement;
-  let expandedNodes: Set<string> = new Set(['Home']);
+  let container: HTMLDivElement;
+  const expandedNodesStore = writable(new Set<string>());
+  let pageHistory: string[] = ['Home'];
+  let historyIndex: number = 0;
+  
+  // Context menu variables
+  let showContextMenu = false;
+  let menuPosition = { x: 0, y: 0 };
+  let selectedWord = '';
+  let menuText = '';
+  
+  // Subscribe to the store
+  $: expandedNodes = $expandedNodesStore;
   
   // Sanitize mode variables
   let isSanitizing = false;
@@ -30,36 +44,28 @@
     const root: TreeNode = {
       name: 'Home',
       path: 'Home',
-      isPage: false,  // Changed to false so it shows as expandable folder
+      isPage: false,
       children: new Map()
     };
 
-    // Extract links from the Home page
+    // Add links from Home
     const homePage = $pages['Home'];
     if (homePage) {
-      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      const linkRegex = /\[([^\]]+)\]/g;
       let match;
-      const links = new Set<string>();
-      
       while ((match = linkRegex.exec(homePage.content)) !== null) {
-        links.add(match[1].trim());
-      }
-
-      // For each link, add it as a child and recursively add its children
-      links.forEach((linkTitle) => {
+        const linkTitle = match[1].trim();
         if (!root.children.has(linkTitle)) {
-          const childNode: TreeNode = {
+          const node: TreeNode = {
             name: linkTitle,
-            path: linkTitle,
+            path: 'Home/' + linkTitle,
             isPage: !!$pages[linkTitle],
             children: new Map()
           };
-          root.children.set(linkTitle, childNode);
-          
-          // Recursively add children from linked pages
-          addChildrenToNode(childNode, linkTitle, new Set(['Home', linkTitle]));
+          root.children.set(linkTitle, node);
+          addChildrenToNode(node, linkTitle, new Set(['Home', linkTitle]));
         }
-      });
+      }
     }
 
     return root;
@@ -69,7 +75,7 @@
     const page = $pages[pageName];
     if (!page) return;
 
-    const linkRegex = /\[\[([^\]]+)\]\]/g;
+    const linkRegex = /\[([^\]]+)\]/g;
     let match;
 
     while ((match = linkRegex.exec(page.content)) !== null) {
@@ -82,7 +88,7 @@
         if (!node.children.has(linkTitle)) {
           const childNode: TreeNode = {
             name: linkTitle,
-            path: linkTitle,
+            path: node.path + '/' + linkTitle,
             isPage: !!$pages[linkTitle],
             children: new Map()
           };
@@ -96,37 +102,89 @@
   }
 
   function toggleNode(path: string) {
-    if (expandedNodes.has(path)) {
-      expandedNodes.delete(path);
-    } else {
-      expandedNodes.add(path);
-    }
-    expandedNodes = expandedNodes;
+    expandedNodesStore.update(set => {
+      if (set.has(path)) {
+        set.delete(path);
+      } else {
+        set.add(path);
+      }
+      return set;
+    });
   }
 
-  $: pageTree = buildPageTree();
+  const pageTreeStore = derived(pages, $pages => buildPageTree());
+  let pageTree: TreeNode;
+  $: pageTree = $pageTreeStore;
 
-  function loadPage(title: string) {
-    currentTitle = title;
-    const page = get(pages)[title];
-    content = page?.content ?? '';
+  $: expandedNodesStore.update(set => {
+    const existing = new Set<string>();
+    const collect = (node: TreeNode) => {
+      existing.add(node.path);
+      for (const child of node.children.values()) {
+        collect(child);
+      }
+    };
+    collect(pageTree);
+    return new Set([...set].filter(p => existing.has(p)));
+  });
+
+  function startResize(e: MouseEvent) {
+    isResizing = true;
+    document.addEventListener('mousemove', resize);
+    document.addEventListener('mouseup', stopResize);
+  }
+
+  function resize(e: MouseEvent) {
+    if (isResizing) {
+      const newWidth = e.clientX;
+      if (newWidth > 100 && newWidth < window.innerWidth - 200) {
+        sidebarWidth = newWidth;
+        if (browser) localStorage.setItem('sidebarWidth', newWidth.toString());
+      }
+    }
+  }
+
+  function stopResize() {
+    isResizing = false;
+    document.removeEventListener('mousemove', resize);
+    document.removeEventListener('mouseup', stopResize);
+  }
+
+  function goBack() {
+    if (historyIndex > 0) {
+      historyIndex--;
+      const title = pageHistory[historyIndex];
+      currentTitle = title;
+      content = $pages[title]?.content || '';
+    }
+  }
+
+  function goForward() {
+    if (historyIndex < pageHistory.length - 1) {
+      historyIndex++;
+      const title = pageHistory[historyIndex];
+      currentTitle = title;
+      content = $pages[title]?.content || '';
+    }
   }
 
   function savePage() {
     pages.update((p) => {
-      p[currentTitle] = {
-        title: currentTitle,
-        content
+      return {
+        ...p,
+        [currentTitle]: {
+          title: currentTitle,
+          content
+        }
       };
-      return p;
     });
   }
 
-  function getSourceLinkedPages(): Set<string> {
+  function getSourceLinkedPages(pages: Record<string, WikiPage>): Set<string> {
     const sourceLinks = new Set<string>();
     
-    Object.values($pages).forEach((page) => {
-      const linkRegex = /\[\[([^\]]+)\]\]/g;
+    Object.values(pages).forEach((page) => {
+      const linkRegex = /\[([^\]]+)\]/g;
       let match;
       while ((match = linkRegex.exec(page.content)) !== null) {
         sourceLinks.add(match[1].trim());
@@ -137,7 +195,7 @@
   }
 
   function renderContent(text: string) {
-    const sourceLinkedPages = getSourceLinkedPages();
+    const sourceLinkedPages = getSourceLinkedPages($pages);
     
     // First, handle source links (explicit [[...]] format)
     let result = parseWikiLinks(text, (title) => {
@@ -151,8 +209,8 @@
       
       // Find words that match page names but aren't already in links
       const escapedPageName = pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      // Match the page name but only if it's not inside an <a> tag or [[...]]
-      const regex = new RegExp(`(?<!\\[\\[)(?<![>\\w])\\b${escapedPageName}\\b(?!\\]\\])(?![^<]*</)`, 'g');
+      // Match the page name but only if it's not inside an <a> tag or [...]
+      const regex = new RegExp(`(?<!\\[)(?<![>\\w])\\b${escapedPageName}\\b(?!\\])(?![^<]*</)`, 'gi');
       
       result = result.replace(regex, `<a href="#" data-link="${pageName}" class="proxy-link">${pageName}</a>`);
     });
@@ -164,9 +222,58 @@
     const target = e.target as HTMLElement;
     const link = target.closest('[data-link]');
     if (link) {
+      // Prevent loading page if textarea is focused to avoid interrupting typing
+      if (document.activeElement?.tagName === 'TEXTAREA') return;
       e.preventDefault();
       loadPage(link.getAttribute('data-link')!);
     }
+  }
+
+  function handleContextMenu(e: MouseEvent) {
+    const textarea = e.target as HTMLTextAreaElement;
+    if (textarea.tagName !== 'TEXTAREA') return;
+
+    e.preventDefault();
+
+    let start = textarea.selectionStart;
+    let end = textarea.selectionEnd;
+
+    if (start === end) {
+      // Select the word under the cursor
+      const text = textarea.value;
+      let wordStart = start;
+      while (wordStart > 0 && /\w/.test(text[wordStart - 1])) wordStart--;
+      let wordEnd = start;
+      while (wordEnd < text.length && /\w/.test(text[wordEnd])) wordEnd++;
+      textarea.setSelectionRange(wordStart, wordEnd);
+      start = wordStart;
+      end = wordEnd;
+    }
+
+    const word = textarea.value.substring(start, end).trim();
+    const currentPages = get(pages);
+    const isExistingPage = Object.keys(currentPages).some(p => p.toLowerCase() === word.toLowerCase());
+    const isAlreadyLinked = content.toLowerCase().includes(`[${word.toLowerCase()}]`);
+    if (word && !isAlreadyLinked) {
+      selectedWord = word;
+      menuText = isExistingPage ? 'Re-wikify orphan' : 'Make wiki page';
+      menuPosition = { x: e.clientX, y: e.clientY };
+      showContextMenu = true;
+    }
+  }
+
+  function makeWikiLink() {
+    const textarea = document.querySelector('textarea') as HTMLTextAreaElement;
+    if (textarea && selectedWord) {
+      textarea.setRangeText(`[${selectedWord}]`);
+      content = textarea.value;
+      savePage();
+    }
+    showContextMenu = false;
+  }
+
+  function hideContextMenu() {
+    showContextMenu = false;
   }
 
   function handleExport() {
@@ -218,9 +325,41 @@
 
   onMount(() => {
     loadPage(currentTitle);
+    if (browser) {
+      const saved = localStorage.getItem('expandedNodes');
+      if (saved) {
+        try {
+          expandedNodesStore.set(new Set(JSON.parse(saved)));
+        } catch (e) {
+          expandedNodesStore.set(new Set(['Home']));
+        }
+      } else {
+        expandedNodesStore.set(new Set(['Home']));
+      }
+      // Load sidebar width
+      const savedWidth = localStorage.getItem('sidebarWidth');
+      if (savedWidth) sidebarWidth = parseInt(savedWidth);
+      // Set initial sidebar width
+      if (container) container.style.setProperty('--sidebar-width', sidebarWidth + 'px');
+    }
+
+    // Hide context menu on click outside
+    const handleGlobalClick = () => {
+      showContextMenu = false;
+    };
+    document.addEventListener('click', handleGlobalClick);
+
+    return () => {
+      document.removeEventListener('click', handleGlobalClick);
+    };
   });
 
-  $: renderedContent = renderContent(content);
+  $: if (browser) localStorage.setItem('expandedNodes', JSON.stringify(Array.from($expandedNodesStore)));
+
+  $: sourceLinkedPages = getSourceLinkedPages($pages);
+  $: orphans = Object.keys($pages).filter(p => !sourceLinkedPages.has(p) && p !== 'Home');
+
+  $: if (container) container.style.setProperty('--sidebar-width', sidebarWidth + 'px');
 
   function findConflicts(): Array<{ pageName: string; sources: string[] }> {
     const sourceMap: Record<string, string[]> = {};
@@ -228,7 +367,7 @@
     
     // Find all source links and track which pages have them
     Object.entries(allPages).forEach(([pageName, page]) => {
-      const linkRegex = /\[\[([^\]]+)\]\]/g;
+      const linkRegex = /\[([^\]]+)\]/g;
       let match;
       
       while ((match = linkRegex.exec(page.content)) !== null) {
@@ -286,9 +425,9 @@
       // Update each source page
       conflict.sources.forEach((sourcePage) => {
         if (sourcePage !== chosenSource) {
-          // Remove [[ ]] from this source page
+          // Remove [ ] from this source page
           allPages[sourcePage].content = allPages[sourcePage].content.replace(
-            new RegExp(`\\[\\[${pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]\\]`, 'g'),
+            new RegExp(`\\[${pageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\]`, 'g'),
             pageName
           );
         }
@@ -317,8 +456,9 @@
 
 <style>
   .container {
+    --sidebar-width: 220px;
     display: grid;
-    grid-template-columns: 220px 1fr;
+    grid-template-columns: var(--sidebar-width) 5px 1fr;
     height: 100vh;
   }
 
@@ -374,6 +514,16 @@
     background-color: #0056b3;
   }
 
+  button:disabled {
+    background-color: #ccc;
+    color: #666;
+    cursor: not-allowed;
+  }
+
+  button:disabled:hover {
+    background-color: #ccc;
+  }
+
   .backup-list {
     border: 1px solid #ddd;
     border-radius: 4px;
@@ -405,8 +555,19 @@
 
   .sidebar {
     overflow-y: auto;
+    overflow-x: auto;
     border-right: 1px solid #ddd;
     padding: 10px;
+  }
+
+  .resizer {
+    width: 5px;
+    cursor: col-resize;
+    background: #ddd;
+  }
+
+  .resizer:hover {
+    background: #bbb;
   }
 
   .tree-node {
@@ -554,118 +715,186 @@
     cursor: not-allowed;
   }
 
+  .context-menu {
+    background: white;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+    padding: 4px 0;
+    min-width: 120px;
+  }
+
+  .context-menu button {
+    display: block;
+    width: 100%;
+    padding: 8px 12px;
+    background: none;
+    border: none;
+    text-align: left;
+    cursor: pointer;
+    font-size: 14px;
+    color: #333;
+  }
+
+  .orphan-list {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+
+  .orphan-item {
+    padding: 4px 0;
+    cursor: pointer;
+    color: #666;
+    text-decoration: none;
+    border-radius: 2px;
+    padding-left: 4px;
+  }
+
+  .orphan-item:hover {
+    background-color: #f0f0f0;
+    color: #333;
+  }
+
 
 </style>
 
-<div class="container">
+<div class="container" bind:this={container}>
   <div class="sidebar">
     <h3>Pages</h3>
-    <div class="tree-node">
-      <div class="tree-item">
-        <TreeNode {pageTree} {expandedNodes} {toggleNode} {loadPage} {currentTitle} node={pageTree} />
-      </div>
-    </div>
-  </div>
-
-  <div class="main-content">
-    <h2>{currentTitle}</h2>
-
-    <div class="controls">
-      <button on:click={handleExport}>Export</button>
-      <button on:click={() => importInput.click()}>Import</button>
-      <button on:click={() => showBackups = !showBackups}>
-        {showBackups ? 'Hide' : 'Show'} Backups ({backups.length})
-      </button>
-      <button on:click={startSanitize}>Sanitize</button>
-    </div>
-
-    <input
-      type="file"
-      accept=".json"
-      bind:this={importInput}
-      on:change={handleImport}
-    />
-
-    {#if showBackups && backups.length > 0}
-      <div class="backup-list">
-        <strong>Recent Backups:</strong>
-        {#each backups.slice().reverse() as backup (backup.timestamp)}
-          <div class="backup-item">
-            <span>{new Date(backup.timestamp).toLocaleString()}</span>
-            <button on:click={() => handleRestoreBackup(backup.timestamp)}>
-              Restore
-            </button>
-          </div>
-        {/each}
-      </div>
-    {/if}
-
-    <textarea
-      bind:value={content}
-      on:input={savePage}
-      placeholder="Type here. Use [[Page Name]] to link."
-      disabled={isSanitizing}
-    ></textarea>
-
-    <h3>Preview</h3>
-    <div
-      class="viewer"
-      on:click={handleClick}
-      role="region"
-      aria-label="Content preview"
-    >
-      {@html renderedContent}
-    </div>
-  </div>
-</div>
-
-{#if isSanitizing && sanitizeConflicts.length > 0}
-  <div class="modal-overlay">
-    <div class="modal">
-      <h3>Resolve Wiki Link Conflicts</h3>
-      
-      {#if currentConflictIndex < sanitizeConflicts.length}
-        {@const conflict = sanitizeConflicts[currentConflictIndex]}
-        
-        <div class="conflict-item">
-          <strong>Page "[[{conflict.pageName}]]" has multiple sources:</strong>
-          <p>This page name is defined as a source link in {conflict.sources.length} places. Please choose which one to keep as the primary source:</p>
+    {#if browser}
+      <div class="tree-node">
+        <div class="tree-item">
+          <TreeNode node={pageTree} {expandedNodes} {toggleNode} {loadPage} {currentTitle} />
         </div>
+      </div>
+      {#if orphans.length > 0}
+        <h4>Orphan Pages</h4>
+        <ul class="orphan-list">
+          {#each orphans as orphan}
+            <li class="orphan-item" on:click={() => loadPage(orphan)}>{orphan}</li>
+          {/each}
+        </ul>
+      {/if}
+    {/if}
+  </div>
+  <div class="resizer" on:mousedown={startResize}></div>
+  {#if browser}
+    <div class="main-content">
+      <h2>{currentTitle}</h2>
 
-        <div>
-          {#each conflict.sources as source}
-            <div class="source-option">
-              <input
-                type="radio"
-                id="source-{source}"
-                name="conflict-source-{currentConflictIndex}"
-                value={source}
-                checked={conflictResolutions[conflict.pageName] === source}
-                on:change={() => conflictResolutions[conflict.pageName] = source}
-              />
-              <label for="source-{source}" style="margin: 0; flex: 1; cursor: pointer;">
-                <button
-                  class="source-link-button"
-                  on:click={() => goToSource(source)}
-                >
-                  {source}
-                </button>
-              </label>
+      <div class="controls">
+        <button on:click={goBack} disabled={historyIndex <= 0}>← Back</button>
+        <button on:click={goForward} disabled={historyIndex >= pageHistory.length - 1}>Forward →</button>
+        <button on:click={handleExport}>Export</button>
+        <button on:click={() => importInput.click()}>Import</button>
+        <button on:click={() => showBackups = !showBackups}>
+          {showBackups ? 'Hide' : 'Show'} Backups ({backups.length})
+        </button>
+        <button on:click={startSanitize}>Sanitize</button>
+      </div>
+
+      <input
+        type="file"
+        accept=".json"
+        bind:this={importInput}
+        on:change={handleImport}
+      />
+
+      {#if showBackups && backups.length > 0}
+        <div class="backup-list">
+          <strong>Recent Backups:</strong>
+          {#each backups.slice().reverse() as backup (backup.timestamp)}
+            <div class="backup-item">
+              <span>{new Date(backup.timestamp).toLocaleString()}</span>
+              <button on:click={() => handleRestoreBackup(backup.timestamp)}>
+                Restore
+              </button>
             </div>
           {/each}
         </div>
-
-        <div class="modal-buttons">
-          <button on:click={cancelSanitize}>Cancel</button>
-          <button 
-            on:click={() => resolveConflict(conflictResolutions[conflict.pageName])}
-            disabled={!conflictResolutions[conflict.pageName]}
-          >
-            {currentConflictIndex < sanitizeConflicts.length - 1 ? 'Next' : 'Finish'}
-          </button>
-        </div>
       {/if}
+
+      <textarea
+        bind:value={content}
+        on:input={savePage}
+        on:contextmenu={handleContextMenu}
+        placeholder="Type here. Use [Page Name] to link."
+        disabled={isSanitizing}
+      ></textarea>
+
+      <h3>Preview</h3>
+      <div
+        class="viewer"
+        on:click={handleClick}
+        role="region"
+        aria-label="Content preview"
+      >
+        {@html renderedContent}
+      </div>
     </div>
-  </div>
+  {/if}
+</div>
+
+{#if browser}
+  {#if showContextMenu}
+    <div 
+      class="context-menu"
+      style="position: fixed; left: {menuPosition.x}px; top: {menuPosition.y}px; z-index: 1001;"
+      on:click|stopPropagation={() => {}}
+    >
+      <button on:click={makeWikiLink}>{menuText}</button>
+    </div>
+  {/if}
+
+  {#if isSanitizing && sanitizeConflicts.length > 0}
+    <div class="modal-overlay">
+      <div class="modal">
+        <h3>Resolve Wiki Link Conflicts</h3>
+        
+        {#if currentConflictIndex < sanitizeConflicts.length}
+          {@const conflict = sanitizeConflicts[currentConflictIndex]}
+          
+          <div class="conflict-item">
+            <strong>Page "[{conflict.pageName}]" has multiple sources:</strong>
+            <p>This page name is defined as a source link in {conflict.sources.length} places. Please choose which one to keep as the primary source:</p>
+          </div>
+
+          <div>
+            {#each conflict.sources as source}
+              <div class="source-option">
+                <input
+                  type="radio"
+                  id="source-{source}"
+                  name="conflict-source-{currentConflictIndex}"
+                  value={source}
+                  checked={conflictResolutions[conflict.pageName] === source}
+                  on:change={() => conflictResolutions[conflict.pageName] = source}
+                />
+                <label for="source-{source}" style="margin: 0; flex: 1; cursor: pointer;">
+                  <button
+                    class="source-link-button"
+                    on:click={() => goToSource(source)}
+                  >
+                    {source}
+                  </button>
+                </label>
+              </div>
+            {/each}
+          </div>
+
+          <div class="modal-buttons">
+            <button on:click={cancelSanitize}>Cancel</button>
+            <button 
+              on:click={() => resolveConflict(conflictResolutions[conflict.pageName])}
+              disabled={!conflictResolutions[conflict.pageName]}
+            >
+              {currentConflictIndex < sanitizeConflicts.length - 1 ? 'Next' : 'Finish'}
+            </button>
+          </div>
+        {/if}
+      </div>
+    </div>
+  {/if}
 {/if}
 
